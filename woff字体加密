@@ -1,0 +1,76 @@
+from fontTools.ttLib import TTFont
+from  xml.dom.minidom import parse
+import hashlib
+
+
+def vaild_captcha(html_res):
+    print(html_res.text)
+    response = etree.HTML(html_res.content.decode())
+    web_str   =re.findall(r'<h1 class="puzzle">(.*?)</h1>',html_res.text)[0]
+    print("web_str:",web_str)
+    post_id = response.xpath("//input[@id='Id']/@value")[0]
+    print("post_id:",post_id)
+    a_content = re.findall(r'"puzzle-a";src:url\("(.*?)"\)',html_res.text)[0]
+    b_content = re.findall(r'"puzzle-b";src:url\("(.*?)"\)',html_res.text)[0]
+    font_url1 = a_content.replace("./",captcha_post_url)
+    font_url2 = b_content.replace("./",captcha_post_url)
+    font_path1 =r"E:\SW_Foreign_Journal\font\{}".format(font_url1.split("/")[-1])
+    save_font(font_path1,font_url1)
+    font_path2 = r"E:\SW_Foreign_Journal\font\{}".format(font_url2.split("/")[-1])
+    save_font(font_path2,font_url2)
+    ture_str = get_true_str(web_str,font_path1,font_path2)
+    print("true_str:",ture_str)
+    data ={"Id":post_id,"Answer":ture_str}
+    html_res2 =request2web(captcha_post_url,methor="post",data=data)
+    return html_res2
+    
+ def read_font_data(font_path,font_base_dict):
+    low_str = "abcdefghijklmnoqprstuvwxyz"
+    font = TTFont(font_path)
+    for item in font['cmap'].tables[0].ttFont.getGlyphOrder():
+        if item in low_str:
+            content= font['glyf'].glyphs.get(item).data
+            hex = hashlib.md5(content).hexdigest()
+            font_base_dict[hex]=item
+    return font_base_dict
+
+def get_true_str(web_str,font_path1,font_path2 ):
+    xml_dict1 = read_xml(font_path1, font_path1.replace("woff", "xml"))
+    xml_dict2 = read_xml(font_path2, font_path2.replace("woff", "xml"))
+    font1 = TTFont(font_path1)
+    font2 = TTFont(font_path2)
+    true_str = []
+    font_base_dict = extract_base_font(font_path1,font_path2)
+    for i in re.findall(r"&#(\d+)", web_str):
+        item = hex(int(i))
+        flag = xml_dict2.get(item)
+        if not flag:
+            flag = xml_dict1.get(item)
+            content = font1['glyf'].glyphs.get(flag).data
+        else:
+            content = font2['glyf'].glyphs.get(flag).data
+        hex1 = hashlib.md5(content).hexdigest()
+        res = font_base_dict.get(hex1)
+        true_str.append(res)
+
+    os.remove(font_path1)
+    os.remove(font_path2)
+    true_str = "".join(true_str)
+    return true_str
+
+def extract_base_font(font_path1,font_path2):
+    base_dict = {}
+    curr_dict = read_font_data(font_path1,base_dict)
+    font_base_dict = read_font_data(font_path2,curr_dict)
+
+    return font_base_dict
+
+def read_xml(font_path,xml_path):
+    font = TTFont(font_path)
+    font.saveXML(xml_path)
+    doc = parse(xml_path)
+    root = doc.documentElement
+    xml_dict = {item.getAttribute("code"): item.getAttribute("name") for item in
+                root.getElementsByTagName("cmap")[0].getElementsByTagName("map")}
+    os.remove(xml_path)
+    return xml_dict
